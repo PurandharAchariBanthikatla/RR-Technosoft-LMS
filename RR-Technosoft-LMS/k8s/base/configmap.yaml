@@ -1,0 +1,22 @@
+# Non-secret backend runtime config. Real credentials (DB password, JWT
+# secret, Razorpay/Twilio/SMTP keys) live in Secret lms-backend-secrets
+# (see secret.example.yaml) — never put them here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lms-backend-config
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+  DB_URL: "jdbc:postgresql://postgres:5432/rr_lms"
+  DB_USERNAME: "lms_user"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  JWT_ACCESS_EXPIRY: "900000"
+  JWT_REFRESH_EXPIRY: "604800000"
+  CORS_ORIGINS: "https://app.rrtechnosoft.com"
+  MAIL_FROM_ADDRESS: "no-reply@rrtechnosoft.com"
+  MAIL_FROM_NAME: "RR Technosoft LMS"
+  WHATSAPP_ENABLED: "false"
+  RAZORPAY_ENABLED: "false"
+  AWS_REGION: "ap-south-1"
+  SEED_DATA: "false"

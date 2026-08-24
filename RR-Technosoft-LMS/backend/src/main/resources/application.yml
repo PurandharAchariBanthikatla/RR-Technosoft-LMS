@@ -1,0 +1,197 @@
+spring:
+  application:
+    name: rr-technosoft-lms
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/rr_lms}
+    username: ${DB_USERNAME:lms_user}
+    password: ${DB_PASSWORD:changeme}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate      # schema is owned by Flyway, never by Hibernate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          batch_size: 30
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+  mail:
+    host: ${SMTP_HOST:smtp.gmail.com}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 200MB
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /api/v1
+  compression:
+    enabled: true
+
+app:
+  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:3000}
+  mail-from-address: ${MAIL_FROM_ADDRESS:no-reply@rrtechnosoft.com}
+  mail-from-name: ${MAIL_FROM_NAME:RR Technosoft LMS}
+
+  jwt:
+    secret: ${JWT_SECRET:CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_IN_PRODUCTION_ENV_VARS_MIN_256_BITS}
+    access-token-expiry-ms: ${JWT_ACCESS_EXPIRY:900000}        # 15 min
+    refresh-token-expiry-ms: ${JWT_REFRESH_EXPIRY:604800000}   # 7 days
+    issuer: rr-technosoft-lms
+
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,https://lms.rrtechnosoft.com}
+
+  aws:
+    s3:
+      bucket: ${S3_BUCKET:rr-technosoft-lms-media}
+      region: ${AWS_REGION:ap-south-1}
+      access-key: ${AWS_ACCESS_KEY_ID:}
+      secret-key: ${AWS_SECRET_ACCESS_KEY:}
+      presigned-url-expiry-minutes: 60
+
+  whatsapp:
+    enabled: ${WHATSAPP_ENABLED:false}
+    account-sid: ${TWILIO_ACCOUNT_SID:}
+    auth-token: ${TWILIO_AUTH_TOKEN:}
+    from-number: ${TWILIO_WHATSAPP_FROM:}
+
+  payment:
+    razorpay:
+      # See RazorpayProperties — enabled defaults to false so local/dev
+      # environments without live credentials can still exercise the
+      # manual-payment and finance-reporting flows.
+      enabled: ${RAZORPAY_ENABLED:false}
+      key-id: ${RAZORPAY_KEY_ID:}
+      key-secret: ${RAZORPAY_KEY_SECRET:}
+      webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+      base-url: ${RAZORPAY_BASE_URL:https://api.razorpay.com/v1}
+
+  chatbot:
+    # See ChatbotProperties — enabled defaults to false so the AI Assistant
+    # screen works end-to-end (create conversation, send message, get a
+    # reply) against SimulatedLlmClient without needing real LLM credentials.
+    # Flip to true once CHATBOT_API_KEY is set to switch to a real
+    # OpenAI-compatible provider (OpenAI, Azure OpenAI's compatible route,
+    # or a self-hosted vLLM/Ollama server) via OpenAiCompatibleLlmClient.
+    enabled: ${CHATBOT_ENABLED:false}
+    api-key: ${CHATBOT_API_KEY:}
+    base-url: ${CHATBOT_BASE_URL:https://api.openai.com/v1}
+    model: ${CHATBOT_MODEL:gpt-4o-mini}
+    max-history-messages: ${CHATBOT_MAX_HISTORY_MESSAGES:20}
+
+  security:
+    max-login-attempts: 5
+    lockout-duration-minutes: 15
+    password-min-length: 8
+
+  seed:
+    enabled: ${SEED_DATA:true}
+    super-admin-email: ${SUPER_ADMIN_EMAIL:superadmin@rrtechnosoft.com}
+    super-admin-password: ${SUPER_ADMIN_PASSWORD:ChangeMe@123}
+    # See DemoDataSeeder — populates a full demo dataset (admin, students,
+    # courses, enrollments, daily tasks, practice problems, fee records, a
+    # payment+receipt, notifications, a chatbot conversation) so a fresh
+    # environment is immediately browsable. Off by default; DO NOT enable
+    # in production. Local dev/demo: set SEED_DEMO_DATA=true in .env.
+    demo-data: ${SEED_DEMO_DATA:false}
+
+springdoc:
+  api-docs:
+    path: /docs/api-docs
+  swagger-ui:
+    path: /docs/swagger-ui.html
+    operationsSorter: method
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+    db:
+      enabled: true
+    redis:
+      enabled: true
+  metrics:
+    tags:
+      application: rr-technosoft-lms-backend
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      percentiles:
+        http.server.requests: 0.5,0.95,0.99
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: RR Technosoft LMS
+    description: Enterprise Learning Management System backend
+    version: "@project.version@"
+
+logging:
+  level:
+    root: INFO
+    com.rrtechnosoft.lms: DEBUG
+    org.springframework.security: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+logging:
+  level:
+    com.rrtechnosoft.lms: INFO
+    org.hibernate.SQL: WARN
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  jpa:
+    show-sql: true

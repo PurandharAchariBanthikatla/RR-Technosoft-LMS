@@ -1,0 +1,28 @@
+# Keep these out of the build context — without this, a local `node_modules`
+# (hundreds of MB) or `.next` gets sent to the Docker daemon and/or copied by
+# `COPY . .`, which is one of the most common causes of a build that looks
+# "stuck" at the context-transfer or COPY step.
+node_modules
+.next
+out
+.swc
+coverage
+playwright-report
+test-results
+tsconfig.tsbuildinfo
+
+# Env / secrets — never bake these into an image layer
+.env
+.env.local
+.env.*.local
+
+# VCS / editor / OS
+.git
+.gitignore
+.idea
+.vscode
+*.iml
+.DS_Store
+
+# Docs not needed at build time
+README.md

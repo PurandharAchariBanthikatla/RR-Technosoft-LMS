@@ -1,0 +1,91 @@
+{
+  "title": "RR Technosoft LMS — Backend Overview",
+  "uid": "rr-lms-backend-overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Service Up",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "up{job=\"rr-lms-backend\"}", "legendFormat": "up" }]
+    },
+    {
+      "id": 2,
+      "title": "HTTP Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(http_server_requests_seconds_count{job=\"rr-lms-backend\"}[5m])) by (status)", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "5xx Error Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"rr-lms-backend\", status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count{job=\"rr-lms-backend\"}[5m]))",
+          "legendFormat": "error rate"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Request Latency Percentiles (s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{job=\"rr-lms-backend\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"rr-lms-backend\"}[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job=\"rr-lms-backend\"}[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "JVM Heap Usage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "jvm_memory_used_bytes{job=\"rr-lms-backend\", area=\"heap\"}", "legendFormat": "used" },
+        { "expr": "jvm_memory_max_bytes{job=\"rr-lms-backend\", area=\"heap\"}", "legendFormat": "max" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "CPU Usage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "process_cpu_usage{job=\"rr-lms-backend\"}", "legendFormat": "process cpu" },
+        { "expr": "system_cpu_usage{job=\"rr-lms-backend\"}", "legendFormat": "system cpu" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "HikariCP Active Connections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "targets": [
+        { "expr": "hikaricp_connections_active{job=\"rr-lms-backend\"}", "legendFormat": "active" },
+        { "expr": "hikaricp_connections_idle{job=\"rr-lms-backend\"}", "legendFormat": "idle" },
+        { "expr": "hikaricp_connections_pending{job=\"rr-lms-backend\"}", "legendFormat": "pending" }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "JVM Threads",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "targets": [
+        { "expr": "jvm_threads_live_threads{job=\"rr-lms-backend\"}", "legendFormat": "live" },
+        { "expr": "jvm_threads_daemon_threads{job=\"rr-lms-backend\"}", "legendFormat": "daemon" }
+      ]
+    }
+  ]
+}

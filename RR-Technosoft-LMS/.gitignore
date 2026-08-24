@@ -1,0 +1,41 @@
+# --- Secrets / environment ---
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# --- Backend (Maven / Java) ---
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+!backend/**/lib/*.jar
+
+# --- Frontend (Next.js / Node) ---
+rr-technosoft-lms/node_modules/
+rr-technosoft-lms/.next/
+rr-technosoft-lms/out/
+rr-technosoft-lms/.swc/
+rr-technosoft-lms/tsconfig.tsbuildinfo
+rr-technosoft-lms/coverage/
+rr-technosoft-lms/playwright-report/
+rr-technosoft-lms/test-results/
+npm-debug.log*
+
+# --- Docker ---
+docker/*.log
+
+# --- Backups produced by scripts/backup.sh ---
+backups/
+*.sql.gz
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
+logs/

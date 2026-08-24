@@ -1,0 +1,64 @@
+# RR Technosoft LMS — Alertmanager routing config
+#
+# Receives firing alerts from Prometheus (see monitoring/prometheus/prometheus.yml
+# `alerting.alertmanagers` target, and monitoring/prometheus/alert.rules.yml for
+# the rules themselves). Routes `critical` alerts to a fast-repeat, always-notify
+# path and `warning` alerts to a slower default path, deduplicated by alertname.
+#
+# The receivers below use Slack webhooks as the default channel. Set
+# SLACK_WEBHOOK_URL in .env and it's picked up via `docker/run.sh` the same way
+# GRAFANA_ADMIN_PASSWORD etc. are — see that script for how it's substituted in.
+# Swap in email/PagerDuty/Opsgenie receivers instead if that's your team's tool;
+# the routing tree below doesn't need to change, only the receivers do.
+
+global:
+  resolve_timeout: 5m
+  # Alertmanager's config format does NOT support ${VAR} substitution (same
+  # limitation noted for prometheus.yml) — this can't be filled in from .env
+  # automatically. Replace with your real Slack incoming-webhook URL before
+  # deploying, or generate this file from a template at deploy time.
+  slack_api_url: "https://hooks.slack.com/services/REPLACE/ME/WITH_YOUR_WEBHOOK"
+
+route:
+  receiver: "default"
+  group_by: ["alertname", "service"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: "critical"
+      repeat_interval: 1h
+    - matchers:
+        - severity="warning"
+      receiver: "warning"
+      repeat_interval: 12h
+
+receivers:
+  - name: "default"
+    slack_configs:
+      - channel: "#lms-alerts"
+        send_resolved: true
+
+  - name: "critical"
+    slack_configs:
+      - channel: "#lms-alerts-critical"
+        send_resolved: true
+        title: "🔴 {{ .CommonLabels.alertname }}"
+
+  - name: "warning"
+    slack_configs:
+      - channel: "#lms-alerts"
+        send_resolved: true
+        title: "🟡 {{ .CommonLabels.alertname }}"
+
+inhibit_rules:
+  # Don't page for downstream symptoms (high latency/error rate) when the
+  # service is already known to be fully down.
+  - source_matchers:
+      - severity="critical"
+      - alertname="BackendDown"
+    target_matchers:
+      - alertname=~"HighErrorRate|HighP99Latency"
+    equal: ["service"]

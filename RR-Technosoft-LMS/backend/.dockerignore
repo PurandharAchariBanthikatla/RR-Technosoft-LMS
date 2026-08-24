@@ -1,0 +1,22 @@
+# Keep these out of the build context — a stale local `target/` (previous
+# build output, can be large) being sent to the Docker daemon or shadowed
+# into the image is unnecessary and slows every build.
+target
+*.class
+*.war
+*.jar
+
+# Env / secrets
+.env
+.env.local
+
+# VCS / editor / OS
+.git
+.gitignore
+.idea
+.vscode
+*.iml
+.DS_Store
+
+# Docs not needed at build time
+README.md

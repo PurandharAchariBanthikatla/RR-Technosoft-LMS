@@ -1,0 +1,98 @@
+groups:
+  - name: rr-lms-backend
+    rules:
+      - alert: BackendDown
+        expr: up{job="rr-lms-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend is down"
+          description: "The rr-lms-backend target has been unreachable for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{job="rr-lms-backend", status=~"5.."}[5m]))
+          /
+          sum(rate(http_server_requests_seconds_count{job="rr-lms-backend"}[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated 5xx error rate"
+          description: "More than 5% of requests have returned 5xx over the last 5 minutes."
+
+      - alert: HighP99Latency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_server_requests_seconds_bucket{job="rr-lms-backend"}[5m])) by (le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 latency above 2s"
+          description: "The 99th percentile request latency has exceeded 2 seconds for 5 minutes."
+
+      - alert: JvmHeapNearLimit
+        expr: |
+          jvm_memory_used_bytes{job="rr-lms-backend", area="heap"}
+          / jvm_memory_max_bytes{job="rr-lms-backend", area="heap"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM heap usage above 90%"
+          description: "Heap usage has stayed above 90% of the configured max for 5 minutes — check for a leak or raise -XX:MaxRAMPercentage."
+
+      - alert: DiskSpaceLow
+        expr: disk_free_bytes{job="rr-lms-backend"} / disk_total_bytes{job="rr-lms-backend"} < 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend disk space below 10%"
+          description: "Free disk space on the backend host/volume has dropped below 10%."
+
+  - name: rr-lms-database-cache
+    rules:
+      - alert: PostgresDown
+        expr: pg_up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Postgres is unreachable"
+          description: "postgres_exporter has been unable to reach Postgres for more than 1 minute."
+
+      - alert: RedisDown
+        expr: redis_up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is unreachable"
+          description: "redis_exporter has been unable to reach Redis for more than 1 minute."
+
+      - alert: PostgresConnectionsNearLimit
+        expr: |
+          sum(pg_stat_database_numbackends{job="postgres"})
+          / on() pg_settings_max_connections{job="postgres"} > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Postgres connections above 80% of max_connections"
+          description: "Active Postgres backend connections have stayed above 80% of max_connections for 5 minutes — check for a connection leak or raise HikariCP/Postgres limits."
+
+      - alert: RedisMemoryNearLimit
+        # Only fires if Redis has a maxmemory limit configured (redis_memory_max_bytes
+        # is 0/absent otherwise) — add `--maxmemory <size>` to the redis run in
+        # docker/run.sh if you want this alert to be meaningful.
+        expr: redis_memory_used_bytes{job="redis"} / redis_memory_max_bytes{job="redis"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage above 90%"
+          description: "Redis used memory has stayed above 90% of maxmemory for 5 minutes — check eviction policy and key TTLs."

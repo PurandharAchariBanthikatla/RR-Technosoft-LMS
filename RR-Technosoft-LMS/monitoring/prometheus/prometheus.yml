@@ -1,0 +1,50 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: "rr-technosoft-lms"
+
+rule_files:
+  - "alert.rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["rr-lms-alertmanager:9093"]
+
+scrape_configs:
+  # Spring Boot Actuator, exported in Prometheus text format via
+  # micrometer-registry-prometheus (see backend/pom.xml + application.yml).
+  - job_name: "rr-lms-backend"
+    metrics_path: "/api/v1/actuator/prometheus"
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["rr-lms-backend:8080"]
+        labels:
+          service: "backend"
+          # NOTE: Prometheus's own YAML config does not expand ${VAR} shell-style
+          # substitution — that only works for env vars passed to the container
+          # itself. If you need a per-environment label here,
+          # generate this file from a template at deploy time instead (e.g. envsubst
+          # in the CI/CD pipeline, or separate prometheus.yml per environment/overlay).
+          environment: "production"
+
+  # Prometheus scraping itself.
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # postgres_exporter / redis_exporter sidecar containers — started alongside
+  # postgres/redis by `docker/run.sh --monitoring` (see that script). Feeds
+  # the "Database & Cache" Grafana dashboard.
+  - job_name: "postgres"
+    static_configs:
+      - targets: ["rr-lms-postgres-exporter:9187"]
+        labels:
+          service: "postgres"
+
+  - job_name: "redis"
+    static_configs:
+      - targets: ["rr-lms-redis-exporter:9121"]
+        labels:
+          service: "redis"

@@ -1,0 +1,73 @@
+# Nightly Postgres backup CronJob and the PVC it writes to.
+# Keep the schedule below in sync with BackupConfig.scheduleCron if the
+# application-level scheduler (see scripts/backup.sh) is also enabled.
+
+# ---- CronJob: runs scripts/backup.sh on a schedule, dumps to the PVC ----
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lms-db-backup
+spec:
+  schedule: "0 2 * * *" # 02:00 daily — keep in sync with BackupConfig.scheduleCron if both are enabled
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: postgres:16-alpine
+              command: ["/scripts/backup.sh"]
+              env:
+                - name: DB_HOST
+                  value: "postgres"
+                - name: DB_PORT
+                  value: "5432"
+                - name: DB_NAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: lms-db-secrets
+                      key: POSTGRES_DB
+                - name: DB_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: lms-db-secrets
+                      key: POSTGRES_USER
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: lms-db-secrets
+                      key: POSTGRES_PASSWORD
+                - name: BACKUP_DIR
+                  value: "/backups"
+                - name: RETENTION_DAYS
+                  value: "30"
+              volumeMounts:
+                - name: backup-script
+                  mountPath: /scripts
+                - name: backup-storage
+                  mountPath: /backups
+          volumes:
+            - name: backup-script
+              configMap:
+                name: lms-backup-script
+                defaultMode: 0755
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: lms-backup-pvc
+
+---
+# ---- PersistentVolumeClaim: durable storage for backup_*.sql.gz files ----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lms-backup-pvc
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi

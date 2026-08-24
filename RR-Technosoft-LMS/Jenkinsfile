@@ -1,0 +1,271 @@
+// RR Technosoft LMS — CI/CD pipeline
+//
+// Stages: checkout -> backend build/test -> Trivy dependency scan -> frontend
+// build/test -> Docker image build -> Trivy image scan -> push to registry ->
+// deploy to Kubernetes. Deploy stages only run on `main` (staging) and tags
+// `v*` (production), and require manual approval for production per standard
+// change control.
+//
+// Trivy stages run via `docker run aquasec/trivy:latest`, so they need the
+// same Docker access as the existing 'Build Docker Images' stage (agent has
+// Docker installed / mounted socket). Both fail the build on HIGH/CRITICAL
+// findings (--exit-code 1) — lower to report-only by dropping that flag if
+// you want scans informational-only while the team triages existing findings.
+//
+// Required Jenkins credentials (Manage Jenkins > Credentials):
+//   - docker-registry-creds   (username/password or token, for `docker login`)
+//   - kubeconfig-staging      (secret file, kubectl config for the staging cluster)
+//   - kubeconfig-production   (secret file, kubectl config for the production cluster)
+//   - sonarqube-token         (secret text, optional — only needed if SonarQube stage is enabled)
+//
+// Required Jenkins plugins: Pipeline, Docker Pipeline, Kubernetes CLI, JUnit,
+// HTML Publisher, Slack Notification (optional, for the notify stage).
+
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+        timeout(time: 45, unit: 'MINUTES')
+    }
+
+    environment {
+        REGISTRY            = "${env.DOCKER_REGISTRY ?: 'docker.io/rrtechnosoft'}"
+        BACKEND_IMAGE        = "${REGISTRY}/lms-backend"
+        FRONTEND_IMAGE       = "${REGISTRY}/lms-frontend"
+        IMAGE_TAG            = "${env.GIT_COMMIT?.take(8) ?: 'local'}"
+        MAVEN_OPTS           = "-Dmaven.repo.local=${WORKSPACE}/.m2/repository"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+                }
+            }
+        }
+
+        stage('Backend: Build & Unit Tests') {
+            steps {
+                dir('backend') {
+                    sh 'mvn -B -ntp clean compile'
+                    sh 'mvn -B -ntp test'
+                }
+            }
+            post {
+                always {
+                    junit testResults: 'backend/target/surefire-reports/*.xml', allowEmptyResults: true
+                    jacoco execPattern: 'backend/target/jacoco.exec', classPattern: 'backend/target/classes',
+                           sourcePattern: 'backend/src/main/java', skipCopyOfSrcFiles: false
+                }
+            }
+        }
+
+        stage('Backend: Integration Tests') {
+            steps {
+                dir('backend') {
+                    // Testcontainers spins up ephemeral Postgres/Redis containers for
+                    // @SpringBootTest-annotated integration tests — requires the Jenkins
+                    // agent to have Docker-in-Docker or a mounted Docker socket.
+                    sh 'mvn -B -ntp verify -DskipUnitTests=true -Pintegration-test'
+                }
+            }
+            post {
+                always {
+                    junit testResults: 'backend/target/failsafe-reports/*.xml', allowEmptyResults: true
+                }
+            }
+        }
+
+        stage('Backend: Package') {
+            steps {
+                dir('backend') {
+                    sh 'mvn -B -ntp package -DskipTests'
+                }
+            }
+            post {
+                success {
+                    archiveArtifacts artifacts: 'backend/target/lms-backend.war', fingerprint: true
+                }
+            }
+        }
+
+        stage('Security: Dependency Scan') {
+            steps {
+                // Trivy `fs` mode scans the Maven/npm dependency trees for known CVEs
+                // without needing images built yet — runs early so a vulnerable
+                // dependency fails fast, before spending time on Docker builds/push.
+                // exit-code 1 fails the build on HIGH/CRITICAL findings; drop
+                // --exit-code (or lower the --severity list) to report-only instead.
+                sh '''
+                    docker run --rm \
+                        -v "$WORKSPACE":/scan -w /scan \
+                        aquasec/trivy:latest fs \
+                        --scanners vuln \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 1 \
+                        --format table \
+                        .
+                '''
+            }
+        }
+
+        stage('Frontend: Install & Lint') {
+            steps {
+                dir('rr-technosoft-lms') {
+                    sh 'npm ci'
+                    sh 'npm run lint'
+                    sh 'npx tsc --noEmit'
+                }
+            }
+        }
+
+        stage('Frontend: Unit Tests') {
+            steps {
+                dir('rr-technosoft-lms') {
+                    sh 'npm run test -- --ci --coverage'
+                }
+            }
+            post {
+                always {
+                    junit testResults: 'rr-technosoft-lms/reports/junit.xml', allowEmptyResults: true
+                    publishHTML(target: [
+                        reportDir: 'rr-technosoft-lms/coverage/lcov-report',
+                        reportFiles: 'index.html',
+                        reportName: 'Frontend Coverage'
+                    ])
+                }
+            }
+        }
+
+        stage('Frontend: Build') {
+            steps {
+                dir('rr-technosoft-lms') {
+                    sh 'npm run build'
+                }
+            }
+        }
+
+        stage('Frontend: E2E Tests') {
+            when { anyOf { branch 'main'; branch 'develop' } }
+            steps {
+                dir('rr-technosoft-lms') {
+                    sh 'npx playwright install --with-deps'
+                    sh 'npx playwright test'
+                }
+            }
+            post {
+                always {
+                    publishHTML(target: [
+                        reportDir: 'rr-technosoft-lms/playwright-report',
+                        reportFiles: 'index.html',
+                        reportName: 'Playwright E2E Report'
+                    ])
+                }
+            }
+        }
+
+        stage('Build Docker Images') {
+            when { anyOf { branch 'main'; branch 'develop'; tag 'v*' } }
+            steps {
+                script {
+                    docker.build("${BACKEND_IMAGE}:${IMAGE_TAG}", "backend")
+                    docker.build("${FRONTEND_IMAGE}:${IMAGE_TAG}", "rr-technosoft-lms")
+                }
+            }
+        }
+
+        stage('Security: Image Scan') {
+            when { anyOf { branch 'main'; branch 'develop'; tag 'v*' } }
+            steps {
+                // Scans the images actually built above (OS packages + app deps
+                // baked into the layers), not just source — catches base-image CVEs
+                // that the dependency scan above can't see. Gated before Push so a
+                // vulnerable image never reaches the registry.
+                sh """
+                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy:latest image \
+                        --severity HIGH,CRITICAL --exit-code 1 --format table \
+                        ${BACKEND_IMAGE}:${IMAGE_TAG}
+                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy:latest image \
+                        --severity HIGH,CRITICAL --exit-code 1 --format table \
+                        ${FRONTEND_IMAGE}:${IMAGE_TAG}
+                """
+            }
+        }
+
+        stage('Push Docker Images') {
+            when { anyOf { branch 'main'; branch 'develop'; tag 'v*' } }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-registry-creds', usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS')]) {
+                    sh 'echo "$REG_PASS" | docker login "$REGISTRY" -u "$REG_USER" --password-stdin'
+                    sh "docker push ${BACKEND_IMAGE}:${IMAGE_TAG}"
+                    sh "docker push ${FRONTEND_IMAGE}:${IMAGE_TAG}"
+                    script {
+                        if (env.TAG_NAME) {
+                            sh "docker tag ${BACKEND_IMAGE}:${IMAGE_TAG} ${BACKEND_IMAGE}:latest"
+                            sh "docker tag ${FRONTEND_IMAGE}:${IMAGE_TAG} ${FRONTEND_IMAGE}:latest"
+                            sh "docker push ${BACKEND_IMAGE}:latest"
+                            sh "docker push ${FRONTEND_IMAGE}:latest"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Staging') {
+            when { branch 'develop' }
+            steps {
+                withKubeConfig([credentialsId: 'kubeconfig-staging']) {
+                    sh """
+                        kubectl -n rr-lms-staging set image deployment/lms-backend backend=${BACKEND_IMAGE}:${IMAGE_TAG}
+                        kubectl -n rr-lms-staging set image deployment/lms-frontend frontend=${FRONTEND_IMAGE}:${IMAGE_TAG}
+                        kubectl -n rr-lms-staging rollout status deployment/lms-backend --timeout=180s
+                        kubectl -n rr-lms-staging rollout status deployment/lms-frontend --timeout=180s
+                    """
+                }
+            }
+        }
+
+        stage('Approve Production Deploy') {
+            when { tag 'v*' }
+            steps {
+                timeout(time: 24, unit: 'HOURS') {
+                    input message: "Deploy ${IMAGE_TAG} to production?", ok: 'Deploy'
+                }
+            }
+        }
+
+        stage('Deploy to Production') {
+            when { tag 'v*' }
+            steps {
+                withKubeConfig([credentialsId: 'kubeconfig-production']) {
+                    sh """
+                        kubectl -n rr-lms-prod set image deployment/lms-backend backend=${BACKEND_IMAGE}:${IMAGE_TAG}
+                        kubectl -n rr-lms-prod set image deployment/lms-frontend frontend=${FRONTEND_IMAGE}:${IMAGE_TAG}
+                        kubectl -n rr-lms-prod rollout status deployment/lms-backend --timeout=300s
+                        kubectl -n rr-lms-prod rollout status deployment/lms-frontend --timeout=300s
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs(patterns: [[pattern: '**/node_modules/**', type: 'EXCLUDE']])
+        }
+        success {
+            echo "Build ${env.BUILD_NUMBER} (${env.GIT_COMMIT_SHORT}) succeeded."
+        }
+        failure {
+            echo "Build ${env.BUILD_NUMBER} (${env.GIT_COMMIT_SHORT}) failed — see stage logs above."
+        }
+    }
+}

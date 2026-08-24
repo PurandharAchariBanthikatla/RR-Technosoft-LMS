@@ -1,0 +1,60 @@
+import { Badge } from "@/components/ui/badge";
+
+const STATUS_MAP: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "success" | "warning" | "outline" }> = {
+  ACTIVE: { label: "Active", variant: "success" },
+  PUBLISHED: { label: "Published", variant: "success" },
+  PRESENT: { label: "Present", variant: "success" },
+  SELECTED: { label: "Selected", variant: "success" },
+  GRADED: { label: "Graded", variant: "success" },
+  COMPLETED: { label: "Completed", variant: "secondary" },
+  ENDED: { label: "Ended", variant: "secondary" },
+  DRAFT: { label: "Draft", variant: "outline" },
+  PENDING: { label: "Pending", variant: "warning" },
+  SUSPENDED: { label: "Suspended", variant: "destructive" },
+  INACTIVE: { label: "Inactive", variant: "outline" },
+  SUBMITTED: { label: "Submitted", variant: "warning" },
+  LATE: { label: "Late", variant: "warning" },
+  SCHEDULED: { label: "Scheduled", variant: "outline" },
+  LIVE: { label: "Live now", variant: "destructive" },
+  OPEN: { label: "Open", variant: "success" },
+  APPLIED: { label: "Applied", variant: "warning" },
+  SHORTLISTED: { label: "Shortlisted", variant: "warning" },
+  DROPPED: { label: "Dropped", variant: "destructive" },
+  ABSENT: { label: "Absent", variant: "destructive" },
+  REJECTED: { label: "Rejected", variant: "destructive" },
+  CANCELLED: { label: "Cancelled", variant: "destructive" },
+  CLOSED: { label: "Closed", variant: "outline" },
+  NOT_SUBMITTED: { label: "Not submitted", variant: "outline" },
+  ARCHIVED: { label: "Archived", variant: "outline" },
+  EXCUSED: { label: "Excused", variant: "outline" },
+  INTERVIEW_SCHEDULED: { label: "Interview scheduled", variant: "warning" },
+  WITHDRAWN: { label: "Withdrawn", variant: "outline" },
+  PASS: { label: "Pass", variant: "success" },
+  FAIL: { label: "Fail", variant: "destructive" },
+  ON_HOLD: { label: "On hold", variant: "warning" },
+  RESCHEDULED: { label: "Rescheduled", variant: "warning" },
+  FULL_TIME: { label: "Full-time", variant: "outline" },
+  INTERNSHIP: { label: "Internship", variant: "outline" },
+  PART_TIME: { label: "Part-time", variant: "outline" },
+  CONTRACT: { label: "Contract", variant: "outline" },
+  SUCCESS: { label: "Success", variant: "success" },
+  FAILED: { label: "Failed", variant: "destructive" },
+  RUNNING: { label: "Running", variant: "warning" },
+
+  // Finance module — FeeStatus / InstallmentStatus / PaymentStatus / RefundStatus / FineStatus
+  PARTIAL: { label: "Partially paid", variant: "warning" },
+  PAID: { label: "Paid", variant: "success" },
+  OVERDUE: { label: "Overdue", variant: "destructive" },
+  WAIVED: { label: "Waived", variant: "outline" },
+  INITIATED: { label: "Initiated", variant: "outline" },
+  REFUNDED: { label: "Refunded", variant: "secondary" },
+  PARTIALLY_REFUNDED: { label: "Partially refunded", variant: "warning" },
+  REQUESTED: { label: "Requested", variant: "warning" },
+  APPROVED: { label: "Approved", variant: "secondary" },
+  PROCESSED: { label: "Processed", variant: "success" },
+};
+
+export function StatusBadge({ status }: { status: string }) {
+  const config = STATUS_MAP[status] ?? { label: status, variant: "outline" as const };
+  return <Badge variant={config.variant}>{config.label}</Badge>;
+}
