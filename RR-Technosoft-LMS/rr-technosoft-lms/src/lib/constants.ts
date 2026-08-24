@@ -1,4 +1,4 @@
-export const API_BASE_URL = "http://13.201.69.114:8081/api/v1";
+export const API_BASE_URL = "http://18.170.40.18:8080/api/v1";
 export const ACCESS_TOKEN_KEY = "rr_lms_access_token";
 export const REFRESH_TOKEN_KEY = "rr_lms_refresh_token";
 

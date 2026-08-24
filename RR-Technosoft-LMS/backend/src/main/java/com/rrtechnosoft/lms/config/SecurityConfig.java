@@ -50,7 +50,7 @@ public class SecurityConfig {
                 // Public
                 .requestMatchers("/auth/**").permitAll()
                 .requestMatchers("/docs/**", "/swagger-ui/**").permitAll()
-                .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers("/actuator/health/**").permitAll()
                 // Org branding (name/logo) needs to render on the public login screen.
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/administration/organization-profile").permitAll()
 
