@@ -1,6 +1,8 @@
 package com.rrtechnosoft.lms.config;
 
+import com.rrtechnosoft.lms.security.JwtAccessDeniedHandler;
 import com.rrtechnosoft.lms.security.JwtAuthFilter;
+import com.rrtechnosoft.lms.security.JwtAuthenticationEntryPoint;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -29,6 +31,8 @@ public class SecurityConfig {
     private final JwtAuthFilter jwtAuthFilter;
     private final JwtProperties jwtProperties;
     private final CorsProperties corsProperties;
+    private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
+    private final JwtAccessDeniedHandler jwtAccessDeniedHandler;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -46,6 +50,15 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            // Without this, Spring Security's default Http403ForbiddenEntryPoint answers
+            // EVERY unauthenticated request (missing header, expired/invalid JWT) with 403,
+            // not 401 — which breaks the frontend's refresh-token retry (client.ts only
+            // retries on 401) and surfaces as random 403s across the app once a 15-minute
+            // access token ages out mid-session. See JwtAuthenticationEntryPoint for detail.
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint(jwtAuthenticationEntryPoint)
+                .accessDeniedHandler(jwtAccessDeniedHandler)
+            )
             .authorizeHttpRequests(auth -> auth
                 // Public
                 .requestMatchers("/auth/**").permitAll()
