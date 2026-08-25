@@ -170,6 +170,22 @@ class Counters:
     quiz_questions_skipped: int = 0
     quiz_attempts: int = 0
     quiz_attempts_skipped: int = 0
+    daily_tasks: int = 0
+    daily_tasks_skipped: int = 0
+    daily_task_completions: int = 0
+    daily_task_completions_skipped: int = 0
+    assignments: int = 0
+    assignments_skipped: int = 0
+    assignment_submissions: int = 0
+    assignment_submissions_skipped: int = 0
+    live_classes: int = 0
+    live_classes_skipped: int = 0
+    learning_resources: int = 0
+    learning_resources_skipped: int = 0
+    practice_problems: int = 0
+    practice_problems_skipped: int = 0
+    practice_submissions: int = 0
+    practice_submissions_skipped: int = 0
     errors: list = field(default_factory=list)
 
 
@@ -1383,6 +1399,320 @@ def fetch_one_all(cur, sql: str, params=()) -> list:
 
 
 # ============================================================================
+# 12. DAILY TASKS
+# ============================================================================
+
+def seed_daily_tasks(cur, courses: list, enrollments: list, creator_id: str):
+    """Two tasks per course — one for yesterday (so it can show completed/overdue
+    state) and one for today (so the student dashboard's 'Daily Task' widget has
+    something live to show right now) — plus completions for a sample of the
+    students enrolled in that course."""
+    today = date.today()
+    task_days = [today - timedelta(days=1), today]
+    task_titles = [
+        "Revise today's core concepts and note down 3 questions",
+        "Complete the hands-on lab exercise for this module",
+    ]
+
+    by_course = {}
+    for student, course, _completed in enrollments:
+        by_course.setdefault(course["id"], []).append(student)
+
+    for course in courses:
+        for d, title in zip(task_days, task_titles):
+            existing = fetch_one(
+                cur, "SELECT id FROM daily_tasks WHERE course_id = %s AND task_date = %s",
+                (course["id"], d),
+            )
+            if existing:
+                task_id = existing["id"]
+                C.daily_tasks_skipped += 1
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO daily_tasks (course_id, title, description, task_date, created_by)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (course["id"], title, f"{title} for {course['title']}. (Demo content.)", d, creator_id),
+                )
+                task_id = cur.fetchone()["id"]
+                C.daily_tasks += 1
+
+            for i, student in enumerate(by_course.get(course["id"], [])):
+                existing_c = fetch_one(
+                    cur, "SELECT 1 FROM daily_task_completions WHERE task_id = %s AND student_id = %s",
+                    (task_id, student["id"]),
+                )
+                if existing_c:
+                    C.daily_task_completions_skipped += 1
+                    continue
+
+                is_done = (i % 3 != 0)  # ~2/3 of students have done it
+                cur.execute(
+                    """
+                    INSERT INTO daily_task_completions (task_id, student_id, is_done, done_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (task_id, student_id) DO NOTHING
+                    """,
+                    (task_id, student["id"], is_done,
+                     datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 20)) if is_done else None),
+                )
+                if cur.rowcount:
+                    C.daily_task_completions += 1
+                else:
+                    C.daily_task_completions_skipped += 1
+
+
+# ============================================================================
+# 13. ASSIGNMENTS
+# ============================================================================
+
+def seed_assignments(cur, courses: list, enrollments: list, creator_id: str):
+    """One assignment per course, attached to the 'Hands-on Practice' module,
+    with a submission per enrolled student in a realistic mix of statuses."""
+    by_course = {}
+    for student, course, _completed in enrollments:
+        by_course.setdefault(course["id"], []).append(student)
+
+    for course in courses:
+        module = fetch_one(
+            cur, "SELECT id FROM course_modules WHERE course_id = %s AND position = 2", (course["id"],),
+        )
+        module_id = module["id"] if module else None
+
+        title = f"{course['title']} — Hands-on Assignment"
+        existing = fetch_one(cur, "SELECT id FROM assignments WHERE course_id = %s AND title = %s",
+                              (course["id"], title))
+        if existing:
+            assignment_id = existing["id"]
+            C.assignments_skipped += 1
+        else:
+            due_at = datetime.now(timezone.utc) + timedelta(days=7)
+            cur.execute(
+                """
+                INSERT INTO assignments (course_id, module_id, title, instructions, attachment_url,
+                                          max_score, due_at, created_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (course["id"], module_id, title,
+                 f"Apply what you've learned in {course['title']} to the attached brief. "
+                 "Submit your work as a link or a short write-up. (Demo content.)",
+                 f"https://cdn.rrtechnosoft.demo/assignments/{course['slug']}-brief.pdf",
+                 100, due_at, creator_id),
+            )
+            assignment_id = cur.fetchone()["id"]
+            C.assignments += 1
+
+        for i, student in enumerate(by_course.get(course["id"], [])):
+            existing_s = fetch_one(
+                cur, "SELECT 1 FROM assignment_submissions WHERE assignment_id = %s AND student_id = %s",
+                (assignment_id, student["id"]),
+            )
+            if existing_s:
+                C.assignment_submissions_skipped += 1
+                continue
+
+            # Deterministic mix: graded, submitted-awaiting-grade, late, not yet submitted.
+            bucket = i % 4
+            if bucket == 0:
+                status, score, feedback = "GRADED", random.randint(65, 100), "Good work — keep it up."
+                submitted_at = datetime.now(timezone.utc) - timedelta(days=3)
+                graded_at, graded_by = datetime.now(timezone.utc) - timedelta(days=1), creator_id
+            elif bucket == 1:
+                status, score, feedback = "SUBMITTED", None, None
+                submitted_at = datetime.now(timezone.utc) - timedelta(hours=6)
+                graded_at, graded_by = None, None
+            elif bucket == 2:
+                status, score, feedback = "LATE", None, None
+                submitted_at = datetime.now(timezone.utc) - timedelta(hours=2)
+                graded_at, graded_by = None, None
+            else:
+                status, score, feedback = "NOT_SUBMITTED", None, None
+                submitted_at, graded_at, graded_by = None, None, None
+
+            submission_url = (
+                f"https://cdn.rrtechnosoft.demo/submissions/{course['slug']}-{student['id']}.pdf"
+                if status != "NOT_SUBMITTED" else None
+            )
+
+            cur.execute(
+                """
+                INSERT INTO assignment_submissions (assignment_id, student_id, submission_url, submission_text,
+                                                      status, score, feedback, submitted_at, graded_at, graded_by)
+                VALUES (%s, %s, %s, %s, %s::submission_status, %s, %s, %s, %s, %s)
+                ON CONFLICT (assignment_id, student_id) DO NOTHING
+                """,
+                (assignment_id, student["id"], submission_url, None,
+                 status, score, feedback, submitted_at, graded_at, graded_by),
+            )
+            if cur.rowcount:
+                C.assignment_submissions += 1
+            else:
+                C.assignment_submissions_skipped += 1
+
+
+# ============================================================================
+# 14. LIVE CLASSES
+# ============================================================================
+
+LIVE_CLASS_PLATFORMS = ["GOOGLE_MEET", "ZOOM", "MS_TEAMS"]
+
+
+def seed_live_classes(cur, courses: list, creator_id: str):
+    """One completed (past, with a recording) and one scheduled (upcoming) live
+    class per course, so both the 'past sessions' and 'join now / upcoming'
+    views on the student and admin sides have real rows to show."""
+    now = datetime.now(timezone.utc)
+
+    for idx, course in enumerate(courses):
+        platform = LIVE_CLASS_PLATFORMS[idx % len(LIVE_CLASS_PLATFORMS)]
+
+        sessions = [
+            (f"{course['title']} — Live Doubt Clearing Session",
+             now - timedelta(days=4, hours=-18), now - timedelta(days=4, hours=-19), "COMPLETED",
+             f"https://cdn.rrtechnosoft.demo/recordings/{course['slug']}-session1.mp4"),
+            (f"{course['title']} — Live Q&A and Walkthrough",
+             now + timedelta(days=(idx % 5) + 1, hours=18), now + timedelta(days=(idx % 5) + 1, hours=19),
+             "SCHEDULED", None),
+        ]
+
+        for title, start, end, status, recording_url in sessions:
+            existing = fetch_one(cur, "SELECT 1 FROM live_classes WHERE course_id = %s AND title = %s",
+                                  (course["id"], title))
+            if existing:
+                C.live_classes_skipped += 1
+                continue
+
+            cur.execute(
+                """
+                INSERT INTO live_classes (course_id, title, platform, meeting_link, scheduled_start,
+                                           scheduled_end, status, recording_url, created_by)
+                VALUES (%s, %s, %s::live_class_platform, %s, %s, %s, %s::live_class_status, %s, %s)
+                """,
+                (course["id"], title, platform,
+                 f"https://meet.rrtechnosoft.demo/{course['slug']}-{'past' if status == 'COMPLETED' else 'upcoming'}",
+                 start, end, status, recording_url, creator_id),
+            )
+            C.live_classes += 1
+
+
+# ============================================================================
+# 15. LEARNING RESOURCES
+# ============================================================================
+
+RESOURCE_DEFS = [
+    ("Cheat Sheet", "PDF", "Reference"),
+    ("Interview Questions", "DOCUMENT", "Interview Prep"),
+]
+
+
+def seed_learning_resources(cur, courses: list, creator_id: str):
+    for course in courses:
+        for label, resource_type, category in RESOURCE_DEFS:
+            title = f"{course['title']} — {label}"
+            existing = fetch_one(cur, "SELECT 1 FROM learning_resources WHERE title = %s", (title,))
+            if existing:
+                C.learning_resources_skipped += 1
+                continue
+
+            file_key = f"{course['slug']}-{slugify(label)}"
+            cur.execute(
+                """
+                INSERT INTO learning_resources (title, description, resource_type, category, course_id,
+                                                  file_url, file_key, file_size_bytes, is_published, uploaded_by)
+                VALUES (%s, %s, %s::resource_type, %s, %s, %s, %s, %s, true, %s)
+                """,
+                (title, f"{label} for {course['title']}. (Demo content.)", resource_type, category,
+                 course["id"], f"https://cdn.rrtechnosoft.demo/resources/{file_key}.pdf", file_key,
+                 random.randint(80_000, 900_000), creator_id),
+            )
+            C.learning_resources += 1
+
+
+# ============================================================================
+# 16. PRACTICE PORTAL (coding problems + submissions)
+# ============================================================================
+
+PRACTICE_PROBLEM_DEFS = [
+    ("Two Sum", "DSA", "BEGINNER"),
+    ("Reverse a Linked List", "DSA", "INTERMEDIATE"),
+    ("Binary Search", "ALGORITHMS", "BEGINNER"),
+    ("Merge Sort", "ALGORITHMS", "INTERMEDIATE"),
+    ("Longest Common Subsequence", "ALGORITHMS", "ADVANCED"),
+    ("Find Duplicate Rows", "SQL", "BEGINNER"),
+    ("Second Highest Salary", "SQL", "INTERMEDIATE"),
+    ("Rank Employees by Department", "SQL", "ADVANCED"),
+    ("FizzBuzz", "PYTHON", "BEGINNER"),
+    ("Word Frequency Counter", "PYTHON", "INTERMEDIATE"),
+    ("Palindrome Check", "JAVA", "BEGINNER"),
+    ("Implement a Stack", "JAVA", "INTERMEDIATE"),
+    ("List S3 Buckets via Boto3", "AWS", "INTERMEDIATE"),
+    ("Write an IAM Least-Privilege Policy", "AWS", "ADVANCED"),
+    ("Write a Dockerfile for a Node App", "DEVOPS", "BEGINNER"),
+    ("Debug a Failing Jenkins Pipeline", "DEVOPS", "INTERMEDIATE"),
+    ("Clean a Messy Sales CSV with Pandas", "DATA_ANALYTICS", "BEGINNER"),
+    ("Build a Cohort Retention Query", "DATA_ANALYTICS", "ADVANCED"),
+]
+
+
+def seed_practice(cur, students: list, creator_id: str):
+    problems = []
+    for title, track, difficulty in PRACTICE_PROBLEM_DEFS:
+        existing = fetch_one(cur, "SELECT id FROM practice_problems WHERE title = %s", (title,))
+        if existing:
+            problems.append({"id": str(existing["id"]), "title": title})
+            C.practice_problems_skipped += 1
+            continue
+
+        cur.execute(
+            """
+            INSERT INTO practice_problems (title, track, difficulty, statement, starter_code,
+                                            test_cases, points, created_by)
+            VALUES (%s, %s::practice_track, %s::difficulty_level, %s, %s, %s::jsonb, %s, %s)
+            RETURNING id
+            """,
+            (title, track, difficulty,
+             f"Solve: {title}. Read the constraints carefully and handle edge cases. (Demo content.)",
+             "def solve(*args):\n    # TODO: implement\n    pass\n",
+             psycopg.types.json.Json([{"input": "demo", "expected": "demo"}]),
+             10 if difficulty == "BEGINNER" else 20 if difficulty == "INTERMEDIATE" else 30,
+             creator_id),
+        )
+        problems.append({"id": str(cur.fetchone()["id"]), "title": title})
+        C.practice_problems += 1
+
+    if not students:
+        return
+
+    for pi, problem in enumerate(problems):
+        attempt_students = students[pi % len(students): pi % len(students) + 6] or students[:6]
+        for si, student in enumerate(attempt_students):
+            existing = fetch_one(
+                cur, "SELECT 1 FROM practice_submissions WHERE problem_id = %s AND student_id = %s",
+                (problem["id"], student["id"]),
+            )
+            if existing:
+                C.practice_submissions_skipped += 1
+                continue
+
+            is_correct = (si + pi) % 3 != 0  # ~2/3 pass, mirrors the quiz-attempt pattern
+            cur.execute(
+                """
+                INSERT INTO practice_submissions (problem_id, student_id, code, language,
+                                                    is_correct, runtime_ms, submitted_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (problem["id"], student["id"],
+                 "def solve(*args):\n    return None  # demo submission\n", "python",
+                 is_correct, random.randint(20, 900),
+                 datetime.now(timezone.utc) - timedelta(days=random.randint(0, 10))),
+            )
+            C.practice_submissions += 1
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -1427,6 +1757,18 @@ def main():
                 print("Seeding attendance history...")
                 seed_attendance(cur, enrollments, creator_id)
 
+                print("Seeding daily tasks...")
+                seed_daily_tasks(cur, courses, enrollments, creator_id)
+
+                print("Seeding assignments...")
+                seed_assignments(cur, courses, enrollments, creator_id)
+
+                print("Seeding live classes...")
+                seed_live_classes(cur, courses, creator_id)
+
+                print("Seeding learning resources...")
+                seed_learning_resources(cur, courses, creator_id)
+
                 print("Seeding finance records (fees, payments, receipts)...")
                 seed_finance(cur, enrollments, course_price_by_id, creator_id)
 
@@ -1447,6 +1789,9 @@ def main():
                 courses_by_slug = {c["slug"]: c for c in courses}
                 quizzes = seed_quizzes(cur, courses_by_slug, creator_id)
                 seed_quiz_attempts(cur, quizzes, students)
+
+                print("Seeding practice portal (coding problems + submissions)...")
+                seed_practice(cur, students, creator_id)
 
         # transaction committed by `with conn:` on clean exit
     except Exception as exc:
@@ -1469,6 +1814,12 @@ def main():
     print(f"Videos created           : {C.videos}  (skipped existing: {C.videos_skipped})")
     print(f"Enrollments created      : {C.enrollments}  (skipped existing: {C.enrollments_skipped})")
     print(f"Attendance created       : {C.attendance}  (skipped existing: {C.attendance_skipped})")
+    print(f"Daily tasks created      : {C.daily_tasks}  (skipped existing: {C.daily_tasks_skipped})")
+    print(f"Daily task completions   : {C.daily_task_completions}  (skipped existing: {C.daily_task_completions_skipped})")
+    print(f"Assignments created      : {C.assignments}  (skipped existing: {C.assignments_skipped})")
+    print(f"Assignment submissions   : {C.assignment_submissions}  (skipped existing: {C.assignment_submissions_skipped})")
+    print(f"Live classes created     : {C.live_classes}  (skipped existing: {C.live_classes_skipped})")
+    print(f"Learning resources       : {C.learning_resources}  (skipped existing: {C.learning_resources_skipped})")
     print(f"Fee records created      : {C.fee_records}  (skipped existing: {C.fee_records_skipped})")
     print(f"Payments created         : {C.payments}")
     print(f"Certificates created     : {C.certificates}  (skipped existing: {C.certificates_skipped})")
@@ -1479,6 +1830,8 @@ def main():
     print(f"Quizzes created          : {C.quizzes}  (skipped existing: {C.quizzes_skipped})")
     print(f"Quiz questions created   : {C.quiz_questions}  (skipped existing: {C.quiz_questions_skipped})")
     print(f"Quiz attempts created    : {C.quiz_attempts}  (skipped existing: {C.quiz_attempts_skipped})")
+    print(f"Practice problems        : {C.practice_problems}  (skipped existing: {C.practice_problems_skipped})")
+    print(f"Practice submissions     : {C.practice_submissions}  (skipped existing: {C.practice_submissions_skipped})")
     print("=" * 60)
     print("SEED COMPLETED SUCCESSFULLY")
     print("=" * 60)
