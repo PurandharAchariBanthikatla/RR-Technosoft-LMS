@@ -5,7 +5,7 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-  imageName: 'purandhar12/frontend'
+  imageName: 'puandhar12/frontend'
   imageTag: '$(Build.BuildId)'
   dockerfilePath: '$(Build.SourcesDirectory)/RR-Technosoft-LMS/rr-technosoft-lms/Dockerfile'
   buildContext: '$(Build.SourcesDirectory)/RR-Technosoft-LMS/rr-technosoft-lms'
@@ -76,7 +76,7 @@ steps:
   inputs:
     command: push
     repository: '$(imageName)'
-    containerRegistry: 'dockerhub-connection'
+    containerRegistry: 'purandhar-connection'
     tags: |
       $(imageTag)
       latest
