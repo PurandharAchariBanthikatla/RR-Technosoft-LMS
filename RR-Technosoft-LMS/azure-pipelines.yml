@@ -1,0 +1,80 @@
+trigger:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  imageName: 'YOUR_DOCKERHUB_USERNAME/rr-technosoft-frontend'
+  imageTag: '$(Build.BuildId)'
+
+steps:
+
+# 1. Find Dockerfile
+- script: |
+    echo "Searching for Dockerfile..."
+
+    find "$(Build.SourcesDirectory)" -name Dockerfile -print
+
+    DOCKERFILE="$(Build.SourcesDirectory)/RR-Technosoft-LMS/RR-Technosoft-LMS/rr-technosoft-lms/Dockerfile"
+
+    if [ ! -f "$DOCKERFILE" ]; then
+      echo "ERROR: Dockerfile not found at:"
+      echo "$DOCKERFILE"
+      exit 1
+    fi
+
+    echo "Dockerfile found successfully."
+  displayName: 'Find Frontend Dockerfile'
+
+
+# 2. Build Docker Image
+- task: Docker@2
+  displayName: 'Build Frontend Docker Image'
+  inputs:
+    command: build
+    repository: '$(imageName)'
+    dockerfile: '$(Build.SourcesDirectory)/RR-Technosoft-LMS/RR-Technosoft-LMS/rr-technosoft-lms/Dockerfile'
+    buildContext: '$(Build.SourcesDirectory)/RR-Technosoft-LMS/RR-Technosoft-LMS/rr-technosoft-lms'
+    tags: |
+      $(imageTag)
+      latest
+
+
+# 3. Run Docker Image
+- script: |
+    docker run -d \
+      --name rr-technosoft-frontend \
+      -p 8080:3000 \
+      $(imageName):$(imageTag)
+
+    echo "Waiting for frontend..."
+    sleep 10
+
+    echo "Container status:"
+    docker ps
+
+    echo "Testing frontend..."
+    curl --fail http://localhost:8080
+
+    echo "Frontend test successful!"
+  displayName: 'Run and Test Frontend'
+
+
+# 4. Remove Test Container
+- script: |
+    docker stop rr-technosoft-frontend
+    docker rm rr-technosoft-frontend
+  displayName: 'Remove Test Container'
+
+
+# 5. Push Image to Docker Registry
+- task: Docker@2
+  displayName: 'Push Frontend Image'
+  inputs:
+    command: push
+    repository: '$(imageName)'
+    containerRegistry: 'dockerhub-connection'
+    tags: |
+      $(imageTag)
+      latest
