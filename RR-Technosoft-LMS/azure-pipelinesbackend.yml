@@ -1,0 +1,60 @@
+trigger:
+- master
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  imageName: 'purandhar12/backend'
+  imageTag: '$(Build.BuildId)'
+  dockerfilePath: '$(Build.SourcesDirectory)/RR-Technosoft-LMS/backend/Dockerfile'
+  buildContext: '$(Build.SourcesDirectory)/RR-Technosoft-LMS/backend'
+
+steps:
+
+# Build Docker Image
+- task: Docker@2
+  displayName: 'Build Backend Docker Image'
+  inputs:
+    command: build
+    repository: '$(imageName)'
+    dockerfile: '$(dockerfilePath)'
+    buildContext: '$(buildContext)'
+    tags: |
+      $(imageTag)
+
+# Run Docker Container
+- script: |
+    docker run -d \
+      --name rr-technosoft-backend \
+      -p 8080:8080 \
+      $(imageName):$(imageTag)
+
+    echo "Waiting for backend to start..."
+    sleep 30
+
+    docker ps -a
+    docker logs rr-technosoft-backend
+  displayName: 'Run Backend Container'
+
+# Test Backend
+- script: |
+    curl --fail http://localhost:8080/api/v1/actuator/health/liveness
+  displayName: 'Test Backend'
+
+# Remove Test Container
+- script: |
+    docker stop rr-technosoft-backend || true
+    docker rm rr-technosoft-backend || true
+  displayName: 'Remove Test Container'
+  condition: always()
+
+# Push Docker Image
+- task: Docker@2
+  displayName: 'Push Backend Image to Docker Hub'
+  inputs:
+    command: push
+    repository: '$(imageName)'
+    containerRegistry: 'purandhar-connection'
+    tags: |
+      $(imageTag)
