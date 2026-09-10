@@ -2,30 +2,29 @@ trigger:
 - master
 
 pool:
-  vmImage: ubuntu-latest
+  vmImage: 'ubuntu-latest'
 
 variables:
   imageName: 'purandhar12/frontend'
   imageTag: '$(Build.BuildId)'
+  dockerfilePath: '$(Build.SourcesDirectory)/RR-Technosoft-LMS/rr-technosoft-lms/Dockerfile'
+  buildContext: '$(Build.SourcesDirectory)/RR-Technosoft-LMS/rr-technosoft-lms'
 
 steps:
 
-# 1. Find Dockerfile
+# 1. Verify Dockerfile
 - script: |
-    echo "Searching for Dockerfile..."
-
-    DOCKERFILE=$(find "$(Build.SourcesDirectory)/RR-Technosoft-LMS/rr-technosoft-lms" -name Dockerfile -type f | head -n 1)
-
-    if [ -z "$DOCKERFILE" ]; then
-      echo "ERROR: Dockerfile not found"
+    echo "Checking Dockerfile..."
+    ls -la "$(buildContext)"
+    
+    if [ ! -f "$(dockerfilePath)" ]; then
+      echo "ERROR: Dockerfile not found!"
+      echo "$(dockerfilePath)"
       exit 1
     fi
-
-    echo "Dockerfile found at:"
-    echo "$DOCKERFILE"
-
-    echo "##vso[task.setvariable variable=DOCKERFILE]$DOCKERFILE"
-  displayName: 'Find Frontend Dockerfile'
+    
+    echo "Dockerfile found successfully."
+  displayName: 'Verify Frontend Dockerfile'
 
 
 # 2. Build Docker Image
@@ -34,20 +33,20 @@ steps:
   inputs:
     command: build
     repository: '$(imageName)'
-    dockerfile: '$(DOCKERFILE)'
-    buildContext: '$(Build.SourcesDirectory)/RR-Technosoft-LMS/rr-technosoft-lms'
+    Dockerfile: '$(dockerfilePath)'
+    buildContext: '$(buildContext)'
     tags: |
       $(imageTag)
       latest
 
 
-# 3. Run Docker Image
+# 3. Run Docker Container and Test
 - script: |
     echo "Starting frontend container..."
 
     docker run -d \
       --name rr-technosoft-frontend \
-      -p 8080:3000 \
+      -p 3000:3000 \
       $(imageName):$(imageTag)
 
     echo "Waiting for frontend..."
@@ -57,7 +56,7 @@ steps:
     docker ps
 
     echo "Testing frontend..."
-    curl --fail http://localhost:8080
+    curl --fail http://localhost:3000
 
     echo "Frontend test successful!"
   displayName: 'Run and Test Frontend'
@@ -68,6 +67,7 @@ steps:
     docker stop rr-technosoft-frontend
     docker rm rr-technosoft-frontend
   displayName: 'Remove Test Container'
+  condition: always()
 
 
 # 5. Push Image to Docker Hub
